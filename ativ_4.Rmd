@@ -1,0 +1,263 @@
+---
+title: "atividade4"
+author: "Nilson Berriel"
+date: "12/05/2022"
+output: html_document
+---
+
+Carregando os pacotes necessários:
+```{r}
+library(tidyverse)
+library(rgbif)
+```
+
+Checando as funções:
+```{r}
+?occ_data
+```
+
+Baixando ocorrências
+```{r}
+dori_gbif <- occ_data(scientificName = "Paracanthurus hepatus", 
+                      hasCoordinate = TRUE,
+                      hasGeospatialIssue=FALSE)
+```
+
+Vendo as dimensões dos dados:
+```{r}
+dim(dori_gbif)
+
+dim(dori_gbif$data)
+```
+
+Checando os campos
+```{r}
+dori_gbif$data %>% names
+```
+
+Checando os problemas reportados
+
+```{r}
+gbif_issues()
+
+issues_gbif <- dori_gbif$data$issues %>% 
+  strsplit(., "[,]") %>%
+  unlist() %>%
+  unique()
+```
+
+Prosseguimos selecionando algumas variáveis que serão úteis para a validação dos dados e futuras análises, como coordenadas, profundidade, nome da base de dados etc.
+
+```{r}
+dori_gbif1 <- dori_gbif$data %>%
+  dplyr::select(scientificName, acceptedScientificName, decimalLatitude, decimalLongitude,
+                issues, waterBody, basisOfRecord, occurrenceStatus, rightsHolder, 
+                datasetName, recordedBy, depth, locality, habitat) 
+dori_gbif1 <- dori_gbif1 %>% 
+  distinct() 
+```
+
+Checando os níveis dos fatores
+```{r}
+lapply(dori_gbif1, unique)
+```
+
+Checando os problemas não resportados
+
+É necessário carregar os seguintes pacotes:
+```{r}
+library(bdc)
+library(CoordinateCleaner)
+```
+
+Checando as coordenadas válidas
+
+```{r}
+check_pf <- 
+  bdc::bdc_coordinates_outOfRange(
+    data = dori_gbif1,
+    lat = "decimalLatitude",
+    lon = "decimalLongitude")
+```
+
+Vamos checar se as coordenadas estão associadas as capitais dos países:
+
+```{r}
+cl <- dori_gbif1 %>%
+  select(acceptedScientificName, decimalLatitude, decimalLongitude) %>%
+  rename(decimallongitude = decimalLongitude,
+         decimallatitude = decimalLatitude,
+         scientificName = acceptedScientificName) %>% 
+  as_tibble() %>% 
+  mutate(val = cc_val(., value = "flagged"),
+         sea = cc_sea(., value = "flagged"),
+         capital = cc_cap(., value = "flagged"))
+```
+
+Verificando as coordenadas com flags
+
+Vamos verificar as capitais (por padrão é um raio de 10 km)
+```{r}
+cl %>% 
+  rename(decimalLongitude = decimallongitude,
+         decimalLatitude = decimallatitude) %>% 
+  bdc::bdc_quickmap(., col_to_map = "capital")  
+
+cl %>% 
+  rename(decimalLongitude = decimallongitude,
+         decimalLatitude = decimallatitude) %>% 
+  bdc::bdc_quickmap(., col_to_map = "sea")  
+
+```
+
+Investigando os níveis supeitos
+
+```{r}
+dori_gbif1 %>% 
+  distinct(waterBody) %>% 
+  pull()
+```
+
+Verificando o nível waterbody
+```{r}
+dori_gbif1 %>%
+  group_by(waterBody) %>% 
+  summarise(occ = length(scientificName)) %>% 
+  ggplot(aes(occ, y=waterBody)) +
+  geom_bar(stat = 'identity') 
+```
+
+Filtrando os locais de ocorrência natural da espécie
+```{r}
+dori_gbif1 %>% 
+  filter(waterBody %in% c("Atlantic Ocean", "Carribean", "Royal Caribbean", "Carribean Sea", "Bonaire")) %>% 
+  distinct(datasetName)
+```
+
+buscando as ocorrências para "Diveboard - Scuba diving citizen science"
+
+```{r}
+dori_gbif1 %>% 
+  filter(datasetName %in% c("Diveboard - Scuba diving citizen science"))
+```
+
+Filtrando todas as ocorrencias do dataset suspeito:
+```{r}
+dori_gbif_ok <- dori_gbif1 %>% 
+  filter(!datasetName %in% c("Diveboard - Scuba diving citizen science"))
+```
+
+Plotando os mapas de ocorrência da Dori
+
+É necessário carregar os seguintes pacotes:
+```{r}
+library(ggmap)
+library(maps)
+library(mapdata)
+```
+
+Vamos definir a área do mapa que queremos:
+```{r}
+world <- map_data('world')
+```
+
+Checando os pontos de ocorrência
+
+```{r}
+ggplot() +
+  geom_polygon(data = world, aes(x = long, y = lat, group = group)) +
+  coord_fixed() +
+  theme_classic() +
+  geom_point(data = dori_gbif_ok, aes(x = decimalLongitude, y = decimalLatitude), color = "red") +
+  labs(x = "longitude", y = "latitude", title = expression(italic("Paracanthurus hepatus")))
+```
+
+Checando a profundidade das ocorrências:
+
+```{r}
+dori_gbif_ok %>% 
+  ggplot(aes(x = depth, fill = waterBody)) +
+  geom_histogram() 
+```
+
+A seguir vamos utilizar os dados disponibilizados pela plataforma OBIS.
+Primeiramente vamos carregar o pacote necessário:
+```{r}
+library(robis)
+```
+
+Selecionando os dados da espécie utilizada:
+```{r}
+dori_obis <- robis::occurrence("Paracanthurus hepatus")
+```
+
+Checandos os dados:
+```{r}
+names(dori_obis)
+
+dori_obis1 <- dori_obis %>% 
+  dplyr::select(scientificName, decimalLatitude, decimalLongitude, bathymetry,
+                flags, waterBody, basisOfRecord, occurrenceStatus, rightsHolder, 
+                datasetName, recordedBy, depth, locality, habitat) %>% 
+  distinct()
+```
+
+Checando os problemas reportados (flags):
+```{r}
+dori_obis1 %>% 
+  distinct(flags)
+```
+
+Checando os possíveis NAs em datasetName
+
+```{r}
+dori_obis1 %>% 
+  filter(!flags %in% c("no_depth,on_land", "on_land", "on_land,depth_exceeds_bath", "depth_exceeds_bath,on_land"),
+         is.na(datasetName)) %>% 
+  distinct(waterBody)
+ 
+  
+```
+
+Checando depth
+```{r}
+dori_obis1 %>% 
+  filter(!flags %in% c("no_depth,on_land", "on_land", "on_land,depth_exceeds_bath", "depth_exceeds_bath,on_land"),
+         !is.na(datasetName),
+         !waterBody %in% c("North America", "North America Atlantic", "atlantique")) %>% 
+  ggplot(aes(x = depth, fill = waterBody)) +
+  geom_histogram() 
+```
+
+Checando os níveis
+```{r}
+dori_obis1 %>% 
+  filter(!flags %in% c("no_depth,on_land", "on_land", "on_land,depth_exceeds_bath", "depth_exceeds_bath,on_land"),
+         !is.na(datasetName),
+         !waterBody %in% c("North America", "North America Atlantic", "atlantique")) %>% 
+  lapply(., unique)
+```
+
+OS dados estão ok, vamos seguir para produção do mapa
+```{r}
+dori_obis_ok <- dori_obis1 %>% 
+  filter(!flags %in% c("no_depth,on_land", "on_land", "on_land,depth_exceeds_bath", "depth_exceeds_bath,on_land"),
+         !is.na(datasetName),
+         !waterBody %in% c("North America", "North America Atlantic", "atlantique", NA)) 
+```
+
+Plotando o mapa
+```{r}
+ggplot() +
+  geom_polygon(data = world, aes(x = long, y = lat, group = group)) +
+  coord_fixed() +
+  theme_classic() +
+  geom_point(data = dori_obis_ok, aes(x = decimalLongitude, y = decimalLatitude, color = waterBody)) +
+  labs(x = "longitude", y = "latitude", title = expression(italic("Paracanthurus hepatus")))
+```
+
+EXTRA
+
+
+
+
